@@ -1,19 +1,19 @@
 package io.shiftleft.js2cpg.core
 
-import java.nio.file.{Path, StandardCopyOption}
 import better.files.File
 import better.files.File.LinkOptions
-import io.shiftleft.js2cpg.passes._
-import io.shiftleft.js2cpg.io.FileDefaults._
-import io.shiftleft.js2cpg.io.FileUtils
-import io.shiftleft.js2cpg.parser.{FreshJsonParser, PackageJsonParser}
-import io.shiftleft.js2cpg.preprocessing.NuxtTranspiler
-import io.shiftleft.js2cpg.preprocessing.TranspilationRunner
-import io.shiftleft.js2cpg.utils.MemoryMetrics
 import io.joern.x2cpg.X2Cpg.newEmptyCpg
 import io.joern.x2cpg.utils.HashUtil
+import io.shiftleft.js2cpg.io.FileDefaults.*
+import io.shiftleft.js2cpg.io.FileUtils
+import io.shiftleft.js2cpg.parser.PackageJsonParser
+import io.shiftleft.js2cpg.passes
+import io.shiftleft.js2cpg.passes.*
+import io.shiftleft.js2cpg.preprocessing.{NuxtTranspiler, TranspilationRunner}
+import io.shiftleft.js2cpg.utils.MemoryMetrics
 import org.slf4j.LoggerFactory
 
+import java.nio.file.{Path, StandardCopyOption}
 import scala.util.{Failure, Success, Try}
 
 class Js2Cpg {
@@ -193,6 +193,8 @@ class Js2Cpg {
     if (config.includeConfigs) {
       new ConfigPass(configFiles(config, CONFIG_FILES), cpg, report).createAndApply()
     }
+
+    new CfgCreationPass(cpg, report).createAndApply()
 
     cpg.close()
   }
