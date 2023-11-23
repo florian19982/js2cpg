@@ -68,6 +68,8 @@ class CfgCreationPass(cpg: Cpg, report: Report)
         handleCfgControlStructureIf(controlStructure, lastNodes)
       case ControlStructureTypes.WHILE =>
         handleCfgControlStructureWhile(controlStructure, lastNodes)
+      case ControlStructureTypes.DO =>
+        handleCfgControlStructureDo(controlStructure, lastNodes)
       case _ =>
         logger.warn(s"unhandled control structure type '${controlStructure.controlStructureType}'.")
         lastNodes
@@ -77,17 +79,17 @@ class CfgCreationPass(cpg: Cpg, report: Report)
   private def handleCfgControlStructureIf(controlStructure: ControlStructure, lastNodes: List[AstNode])
                                          (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
     // Link condition node to lastNodes
-    val conditionNodeList: List[AstNode] = createConditionNodeList(controlStructure, lastNodes)
+    val conditionNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, lastNodes, 1)
     // Now add if and else Nodes and connect them to the condition node
-    val ifNodeList: List[AstNode] = createTrueNodeList(controlStructure, conditionNodeList)
-    val elseNodeList: List[AstNode] = createFalseNodeList(controlStructure, conditionNodeList)
+    val ifNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, conditionNodeList, 2)
+    val elseNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, conditionNodeList, 3)
     (new ListBuffer[AstNode] ++= ifNodeList ++= elseNodeList).toList
   }
 
   private def handleCfgControlStructureWhile(controlStructure: ControlStructure, lastNodes: List[AstNode])
                                             (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
-    val conditionNodeList: List[AstNode] = createConditionNodeList(controlStructure, lastNodes)
-    val whileNodeList: List[AstNode] = createTrueNodeList(controlStructure, conditionNodeList)
+    val conditionNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, lastNodes, 1)
+    val whileNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, conditionNodeList, 2)
     // After the execution block of the while return to the first parameter of the condition. (TRUE-Edge)
     // From there the loop starts again.
     for (whileNode <- whileNodeList) {
@@ -99,30 +101,29 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     conditionNodeList
   }
 
-  private def createConditionNodeList(controlStructure: ControlStructure, lastNodes: List[AstNode])
-                                     (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
-    // Link condition node to lastNodes
-    createCfgStep(controlStructure.astChildren.filter(_.order == 1).head, lastNodes)
+  private def handleCfgControlStructureDo(controlStructure: ControlStructure, lastNodes: List[AstNode])
+                                            (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
+    val doNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, lastNodes, 1)
+    val conditionNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, doNodeList, 2)
+    // After the condition block return to the first statement of the do block. (TRUE-Edge)
+    // From there the loop starts again.
+    for (condNode <- conditionNodeList) {
+      addCfgEdge(condNode, doNodeList.head.astChildren.head)
+    }
+    // The condition node list is returned.
+    // Therefore, in the next step it is connected to the rest of the program
+    // in case the condition does not hold (FALSE-Edge)
+    conditionNodeList
   }
 
-  private def createTrueNodeList(controlStructure: ControlStructure, conditionNodeList: List[AstNode])
+  private def createNodeListOfOrder(controlStructure: ControlStructure, lastNodes: List[AstNode], order: Int)
                                 (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
-    var trueNodeList: List[AstNode] = conditionNodeList
-    if (controlStructure.astChildren.exists(_.order == 2)) {
+    if (controlStructure.astChildren.exists(_.order == order)) {
       // TRUE Edges
-      trueNodeList = createCfgStep(controlStructure.astChildren.filter(_.order == 2).head, conditionNodeList)
+      createCfgStep(controlStructure.astChildren.filter(_.order == order).head, lastNodes)
+    } else {
+      lastNodes
     }
-    trueNodeList
-  }
-
-  private def createFalseNodeList(controlStructure: ControlStructure, conditionNodeList: List[AstNode])
-                                 (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
-    var falseNodeList: List[AstNode] = conditionNodeList
-    if (controlStructure.astChildren.exists(_.order == 3)) {
-      // FALSE Edges
-      falseNodeList = createCfgStep(controlStructure.astChildren.filter(_.order == 3).head, conditionNodeList)
-    }
-    falseNodeList
   }
 
   private def handleCfgCall(call: Call, lastNodes: List[AstNode])
