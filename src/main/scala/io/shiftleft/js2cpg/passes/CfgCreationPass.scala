@@ -70,6 +70,8 @@ class CfgCreationPass(cpg: Cpg, report: Report)
         handleCfgControlStructureWhile(controlStructure, lastNodes)
       case ControlStructureTypes.DO =>
         handleCfgControlStructureDo(controlStructure, lastNodes)
+      case ControlStructureTypes.FOR =>
+        handleCfgControlStructureFor(controlStructure, lastNodes)
       case _ =>
         logger.warn(s"unhandled control structure type '${controlStructure.controlStructureType}'.")
         lastNodes
@@ -109,6 +111,22 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     // From there the loop starts again.
     for (condNode <- conditionNodeList) {
       addCfgEdge(condNode, doNodeList.head.astChildren.head)
+    }
+    // The condition node list is returned.
+    // Therefore, in the next step it is connected to the rest of the program
+    // in case the condition does not hold (FALSE-Edge)
+    conditionNodeList
+  }
+
+  private def handleCfgControlStructureFor(controlStructure: ControlStructure, lastNodes: List[AstNode])
+                                            (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
+    val conditionNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, lastNodes, 2)
+    val forNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, conditionNodeList, 4)
+    val postNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, forNodeList, 3)
+    // After the execution block of the while return to the first parameter of the condition. (TRUE-Edge)
+    // From there the loop starts again.
+    for (postNode <- postNodeList) {
+      addCfgEdge(postNode, conditionNodeList.head.astChildren.head)
     }
     // The condition node list is returned.
     // Therefore, in the next step it is connected to the rest of the program
