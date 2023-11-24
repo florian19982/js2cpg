@@ -2,7 +2,8 @@ package io.shiftleft.js2cpg.passes
 
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, EdgeTypes}
-import io.shiftleft.codepropertygraph.generated.nodes.{AstNode, Block, Call, ControlStructure, Local, Method, MethodReturn}
+import io.shiftleft.codepropertygraph.generated.nodes.{AstNode, Block, Call, ControlStructure, JumpTarget, Local,
+  Method, MethodReturn}
 import io.shiftleft.js2cpg.core.Report
 import io.shiftleft.js2cpg.utils.SourceWrapper.*
 import io.shiftleft.passes.ConcurrentWriterCpgPass
@@ -20,6 +21,7 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     extends ConcurrentWriterCpgPass[Method](cpg) {
 
   private val logger = LoggerFactory.getLogger(getClass)
+  private final val CaseName: String = "case"
 
   override def generateParts(): Array[Method] = cpg.method.toArray
 
@@ -72,6 +74,8 @@ class CfgCreationPass(cpg: Cpg, report: Report)
         handleCfgControlStructureDo(controlStructure, lastNodes)
       case ControlStructureTypes.FOR =>
         handleCfgControlStructureFor(controlStructure, lastNodes)
+      case ControlStructureTypes.SWITCH =>
+        handleCfgControlStructureSwitch(controlStructure, lastNodes)
       case _ =>
         logger.warn(s"unhandled control structure type '${controlStructure.controlStructureType}'.")
         lastNodes
@@ -134,6 +138,18 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     conditionNodeList
   }
 
+  private def handleCfgControlStructureSwitch(controlStructure: ControlStructure, lastNodes: List[AstNode])
+                                             (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
+    var localLastNodes: List[AstNode] = lastNodes
+    if (controlStructure.astChildren.exists(_.order == 1) && controlStructure.astChildren.exists(_.order == 2)) {
+      val valueNode = controlStructure.astChildren.filter(_.order == 1).head
+      val blockNode = controlStructure.astChildren.filter(_.order == 2).head
+      localLastNodes = createCfgStep(valueNode, localLastNodes)
+      localLastNodes = createJumpTargetList(valueNode, blockNode)
+    }
+    localLastNodes
+  }
+
   private def createNodeListOfOrder(controlStructure: ControlStructure, lastNodes: List[AstNode], order: Int)
                                 (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
     if (controlStructure.astChildren.exists(_.order == order)) {
@@ -142,6 +158,35 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     } else {
       lastNodes
     }
+  }
+
+  private def createJumpTargetList(valueNode: AstNode, blockNode: AstNode)
+                                  (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
+    val jumpTargetList: ListBuffer[AstNode] = new ListBuffer[AstNode]
+    for (jumpTargetNode <- blockNode.astChildren.filter(_.isInstanceOf[JumpTarget]).cast[JumpTarget]) {
+      addCfgEdge(valueNode, jumpTargetNode)
+      var lastNode: AstNode = jumpTargetNode
+      // If it is a When with a compared value (so not WHEN OTHERS), connect this value node to the jump target
+      if (jumpTargetNode.name == CaseName && blockNode.astChildren.exists(_.order == lastNode.order + 1)) {
+        val checkValueNode = blockNode.astChildren.filter(_.order == lastNode.order + 1).head
+        addCfgEdge(jumpTargetNode, checkValueNode)
+        lastNode = checkValueNode
+      }
+      // Find the next executed Call for the current Jump target
+      var i: Int = 1
+      while (blockNode.astChildren.exists(_.order == lastNode.order + i) &&
+        !blockNode.astChildren.filter(_.order == lastNode.order + i).head.isInstanceOf[Call]) {
+        i = i + 1
+      }
+      // Connect to the Value
+      if (blockNode.astChildren.exists(_.order == lastNode.order + i) &&
+        blockNode.astChildren.filter(_.order == lastNode.order + i).head.isInstanceOf[Call]) {
+        val callList: List[AstNode] = createCfgStep(blockNode.astChildren.filter(_.order == lastNode.order + i).head,
+          new ListBuffer[AstNode].addOne(lastNode).toList)
+        jumpTargetList ++= callList
+      }
+    }
+    jumpTargetList.toList
   }
 
   private def handleCfgCall(call: Call, lastNodes: List[AstNode])
