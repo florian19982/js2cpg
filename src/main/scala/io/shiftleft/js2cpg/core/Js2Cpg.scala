@@ -196,6 +196,7 @@ class Js2Cpg {
 
     new MethodCallPass(cpg, report).createAndApply()
     new CfgCreationPass(cpg, report).createAndApply()
+    new DdgCreationPass(cpg, report).createAndApply()
 
     cpg.close()
   }
