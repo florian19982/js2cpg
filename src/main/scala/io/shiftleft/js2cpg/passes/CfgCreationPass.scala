@@ -36,6 +36,11 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     }
   }
 
+  /**
+   * Create CFG for given method.
+   *
+   * @param method method for CFG creation
+   */
   private def createCfg(method: Method): Try[DiffGraphBuilder] = {
     implicit val localDiff: DiffGraphBuilder = new DiffGraphBuilder
     Try {
@@ -48,6 +53,14 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     }
   }
 
+  /**
+   * Single step in the CFG creation for a single AST node.
+   *
+   * @param astNode   ast node to handle
+   * @param lastNodes list of last nodes that should be connected to the next eligible node
+   * @param diffGraph diffGraph to populate
+   * @return new list of last nodes that should be connected to the next eligible node
+   */
   private def createCfgStep(astNode: AstNode, lastNodes: List[AstNode])
                            (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
     astNode match {
@@ -63,6 +76,36 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     }
   }
 
+  /**
+   * Handle a Call node.
+   *
+   * @param call      call node to handle
+   * @param lastNodes list of last nodes that should be connected to the next eligible node
+   * @param diffGraph diffGraph to populate
+   * @return new list of last nodes that should be connected to the next eligible node
+   */
+  private def handleCfgCall(call: Call, lastNodes: List[AstNode])
+                           (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
+    var localLastNodes: List[AstNode] = lastNodes
+    if (call.astChildren.toArray.isEmpty) {
+      localLastNodes = handleCfgNoChildren(call, localLastNodes)
+    } else {
+      // Catch special calls here
+      localLastNodes = handleCfgGeneric(call, lastNodes)
+    }
+    addEdgesForAllLastNodes(call, localLastNodes)
+    new ListBuffer[AstNode].addOne(call).toList
+  }
+
+  /**
+   * Handle control structures.
+   * For the different types of control structures, the node is propagated to the corresponding methods.
+   *
+   * @param controlStructure control structure node to handle
+   * @param lastNodes        list of last nodes that should be connected to the next eligible node
+   * @param diffGraph        diffGraph to populate
+   * @return new list of last nodes that should be connected to the next eligible node
+   */
   private def handleCfgControlStructure(controlStructure: ControlStructure, lastNodes: List[AstNode])
                                        (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
     controlStructure.controlStructureType match {
@@ -82,6 +125,15 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     }
   }
 
+  /**
+   * Handle IF control structure.
+   * First, the condition node is connected, than IF and ELSE nodes are connected to the condition.
+   *
+   * @param controlStructure IF control structure node to handle
+   * @param lastNodes        list of last nodes that should be connected to the next eligible node
+   * @param diffGraph        diffGraph to populate
+   * @return new list of last nodes that should be connected to the next eligible node
+   */
   private def handleCfgControlStructureIf(controlStructure: ControlStructure, lastNodes: List[AstNode])
                                          (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
     // Link condition node to lastNodes
@@ -92,6 +144,16 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     (new ListBuffer[AstNode] ++= ifNodeList ++= elseNodeList).toList
   }
 
+  /**
+   * Handle WHILE control structure.
+   * First, the condition node is connected, than the execution block connected to the condition.
+   * Lastly, the execution block is again connected to the condition node to create loop structure.
+   *
+   * @param controlStructure WHILE control structure node to handle
+   * @param lastNodes        list of last nodes that should be connected to the next eligible node
+   * @param diffGraph        diffGraph to populate
+   * @return new list of last nodes that should be connected to the next eligible node
+   */
   private def handleCfgControlStructureWhile(controlStructure: ControlStructure, lastNodes: List[AstNode])
                                             (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
     val conditionNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, lastNodes, 1)
@@ -107,6 +169,16 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     conditionNodeList
   }
 
+  /**
+   * Handle DO...WHILE control structure.
+   * First, the the execution block is connected, than the condition node connected to the last executed node.
+   * Lastly, the execution block is again connected to the condition node to create loop structure.
+   *
+   * @param controlStructure DO...WHILE control structure node to handle
+   * @param lastNodes        list of last nodes that should be connected to the next eligible node
+   * @param diffGraph        diffGraph to populate
+   * @return new list of last nodes that should be connected to the next eligible node
+   */
   private def handleCfgControlStructureDo(controlStructure: ControlStructure, lastNodes: List[AstNode])
                                             (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
     val doNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, lastNodes, 1)
@@ -122,12 +194,23 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     conditionNodeList
   }
 
+  /**
+   * Handle FOR control structure.
+   * First, the the condition node is connected, than the for block connected to the condition.
+   * Then, the post execution block is connected to the last statement of the for block.
+   * Lastly, the post execution block is again connected to the condition node to create loop structure.
+   *
+   * @param controlStructure FOR control structure node to handle
+   * @param lastNodes        list of last nodes that should be connected to the next eligible node
+   * @param diffGraph        diffGraph to populate
+   * @return new list of last nodes that should be connected to the next eligible node
+   */
   private def handleCfgControlStructureFor(controlStructure: ControlStructure, lastNodes: List[AstNode])
                                             (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
     val conditionNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, lastNodes, 2)
     val forNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, conditionNodeList, 4)
     val postNodeList: List[AstNode] = createNodeListOfOrder(controlStructure, forNodeList, 3)
-    // After the execution block of the while return to the first parameter of the condition. (TRUE-Edge)
+    // After the post execution block return to the first parameter of the condition. (TRUE-Edge)
     // From there the loop starts again.
     for (postNode <- postNodeList) {
       addCfgEdge(postNode, conditionNodeList.head.astChildren.head)
@@ -138,6 +221,15 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     conditionNodeList
   }
 
+  /**
+   * Handle SWITCH control structure.
+   * First, handle the value node, then create jump target list for the block.
+   *
+   * @param controlStructure SWITCH control structure node to handle
+   * @param lastNodes        list of last nodes that should be connected to the next eligible node
+   * @param diffGraph        diffGraph to populate
+   * @return new list of last nodes that should be connected to the next eligible node
+   */
   private def handleCfgControlStructureSwitch(controlStructure: ControlStructure, lastNodes: List[AstNode])
                                              (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
     var localLastNodes: List[AstNode] = lastNodes
@@ -150,6 +242,15 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     localLastNodes
   }
 
+  /**
+   * Handle node lists of a certain order below a given control structure.
+   *
+   * @param controlStructure control structure node to handle
+   * @param lastNodes        list of last nodes that should be connected to the next eligible node
+   * @param order            order of control structure's child to handle
+   * @param diffGraph        diffGraph to populate
+   * @return new list of last nodes that should be connected to the next eligible node
+   */
   private def createNodeListOfOrder(controlStructure: ControlStructure, lastNodes: List[AstNode], order: Int)
                                 (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
     if (controlStructure.astChildren.exists(_.order == order)) {
@@ -160,6 +261,15 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     }
   }
 
+  /**
+   * Create jump target list for a SWITCH statement.
+   * For each jump target, connect the value node and the next execution block.
+   *
+   * @param valueNode current value node to match
+   * @param blockNode execution block node
+   * @param diffGraph diffGraph to populate
+   * @return new list of last nodes that should be connected to the next eligible node
+   */
   private def createJumpTargetList(valueNode: AstNode, blockNode: AstNode)
                                   (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
     val jumpTargetList: ListBuffer[AstNode] = new ListBuffer[AstNode]
@@ -189,19 +299,17 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     jumpTargetList.toList
   }
 
-  private def handleCfgCall(call: Call, lastNodes: List[AstNode])
-                              (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
-    var localLastNodes: List[AstNode] = lastNodes
-    if (call.astChildren.toArray.isEmpty) {
-      localLastNodes = handleCfgNoChildren(call, localLastNodes)
-    } else {
-      // Catch special calls here
-      localLastNodes = handleCfgGeneric(call, lastNodes)
-    }
-    addEdgesForAllLastNodes(call, localLastNodes)
-    new ListBuffer[AstNode].addOne(call).toList
-  }
-
+  /**
+   * Handle generic nodes.
+   * Nodes without children are directly connected to the last nodes.
+   * For nodes with children the process is propagated further down.
+   * Reading calls are handled before writing calls to obtain correct order for the DDG pass.
+   *
+   * @param astNode   AST node to handle
+   * @param lastNodes list of last nodes that should be connected to the next eligible node
+   * @param diffGraph diffGraph to populate
+   * @return new list of last nodes that should be connected to the next eligible node
+   */
   private def handleCfgGeneric(astNode: AstNode, lastNodes: List[AstNode])
                               (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
     var localLastNodes: List[AstNode] = lastNodes
@@ -215,12 +323,29 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     localLastNodes
   }
 
+  /**
+   * Handle an AST node that has no children.
+   * Simply all last nodes are connected to the current node
+   * and a new List containing only the current node is returned.
+   *
+   * @param astNode   AST node without children
+   * @param lastNodes list of last nodes that should be connected to the current node
+   * @param diffGraph diffGraph to populate
+   * @return new list of last nodes that should be connected to the next eligible node containing only the current node.
+   */
   private def handleCfgNoChildren(astNode: AstNode, lastNodes: List[AstNode])
                                  (implicit diffGraph: DiffGraphBuilder): List[AstNode] = {
     addEdgesForAllLastNodes(astNode, lastNodes)
     new ListBuffer[AstNode].addOne(astNode).toList
   }
 
+  /**
+   * Connect the current AST node to all nodes in the lastNodes list.
+   *
+   * @param astNode   current AST node
+   * @param lastNodes list of last nodes that should be connected to the current node
+   * @param diffGraph diffGraph to populate
+   */
   private def addEdgesForAllLastNodes(astNode: AstNode, lastNodes: List[AstNode])
                                      (implicit diffGraph: DiffGraphBuilder): Unit = {
     for (lastNode <- lastNodes) {
@@ -228,6 +353,13 @@ class CfgCreationPass(cpg: Cpg, report: Report)
     }
   }
 
+  /**
+   * Add CFG edge to the graph.
+   *
+   * @param fromNode  node the edge should start from
+   * @param toNode    node the edge should lead to
+   * @param diffGraph diffGraph the edge is added to
+   */
   private def addCfgEdge(fromNode: AstNode, toNode: AstNode)(implicit diffGraph: DiffGraphBuilder): Unit = {
     try {
       diffGraph.addEdge(fromNode, toNode, EdgeTypes.CFG)

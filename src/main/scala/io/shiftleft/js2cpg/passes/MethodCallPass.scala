@@ -22,19 +22,11 @@ class MethodCallPass(cpg: Cpg, report: Report)
   private val logger = LoggerFactory.getLogger(getClass)
   private final val methodMap: Map[(String, Int), Method] = generateMethodMap(cpg)
 
-  /**
-   * Only get those calls ending with a parameter list.
-   *
-   * @return calls ending with a parameter list.
-   */
-  override def generateParts(): Array[Call] = cpg.call.filter(_.code.endsWith(")")).toArray
+  override def generateParts(): Array[Call] = {
+    // Only get those calls ending with a parameter list.
+    cpg.call.filter(_.code.endsWith(")")).toArray
+  }
 
-  /**
-   * Run method call pass on a call.
-   *
-   * @param diffGraph diff graph for creation
-   * @param part      call node the method call pass is performed on
-   */
   override def runOnPart(diffGraph: DiffGraphBuilder, part: Call): Unit = {
     val result = doMethodCallPass(part)
     result match {
