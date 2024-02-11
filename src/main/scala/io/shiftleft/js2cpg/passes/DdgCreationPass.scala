@@ -1,7 +1,7 @@
 package io.shiftleft.js2cpg.passes
 
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.EdgeTypes
+import io.shiftleft.codepropertygraph.generated.{EdgeTypes, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.js2cpg.core.Report
 import io.shiftleft.js2cpg.utils.SourceWrapper.*
@@ -122,13 +122,21 @@ class DdgCreationPass(cpg: Cpg, report: Report)
         WriteOps.writes.find(_.operation == call.name) match {
           case Some(WriteOps.IdentifierWrite(_, position, _)) =>
 
-            val tmpIdentifier =
+            val tmpChildAtPos =
               call.astChildren
                 .order(position)
                 .head
-                .asInstanceOf[Identifier]
 
-            val identifier = PseudoIdentifier(tmpIdentifier.name, tmpIdentifier.order)
+            // Either the Identifier is directly under the writing Call at the given position
+            // or there is a field access first.
+            // In latter case, we only consider the Identifiers as a whole.
+            val identifier: PseudoIdentifier = tmpChildAtPos match {
+              case i : Identifier => PseudoIdentifier(i.name, i.order)
+              case c: Call if c.name == Operators.fieldAccess =>
+                val tmpIdentifier = c.astChildren.order(1).head.asInstanceOf[Identifier]
+                PseudoIdentifier(tmpIdentifier.name, tmpIdentifier.order)
+            }
+
 
             val newElement: DDGCalcSet = Set((identifier, call.id()))
 
