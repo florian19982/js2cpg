@@ -148,6 +148,16 @@ class DdgCreationPass(cpg: Cpg, report: Report)
             out = out + (call -> Set())
             kill = kill + (call -> Set())
         }
+      case method: Method =>
+        logger.warn("found method " + method.name)
+        method.astOut.isParameter.foreach(param => {
+          val identifier = PseudoIdentifier(param.name, param.order)
+          val newElement: DDGCalcSet = Set((identifier, method.id()))
+
+          gen = gen + (method -> (gen.getOrElse(method, Set()) ++ newElement))
+          out = out + (method -> (out.getOrElse(method, Set()) ++ newElement))
+          kill = kill + (method -> (kill.getOrElse(method, Set()) ++ newElement))
+        })
       case node: CfgNode =>
         gen = gen + (node -> Set())
         out = out + (node -> Set())
@@ -284,7 +294,7 @@ class DdgCreationPass(cpg: Cpg, report: Report)
     definitions.foreach {
       case (identifier, definedAt) =>
         addReachingEdge(
-          cpg.all.id(definedAt).collectAll[Call].toList.head,
+          cpg.all.id(definedAt).head.asInstanceOf[CfgNode],
           callNode,
           identifier.name)
     }
