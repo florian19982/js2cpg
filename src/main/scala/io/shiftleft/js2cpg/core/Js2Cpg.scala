@@ -194,7 +194,7 @@ class Js2Cpg {
       new ConfigPass(configFiles(config, CONFIG_FILES), cpg, report).createAndApply()
     }
 
-    new MethodCallPass(cpg, report).createAndApply()
+    //new MethodCallPass(cpg, report).createAndApply()
     new CfgCreationPass(cpg, report).createAndApply()
     new DdgCreationPass(cpg, report).createAndApply()
 
